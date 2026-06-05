@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ted Downing Archive</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --bg:#0b1220; --fg:#eaf2ff; --muted:#8ea4c8; --card:#0f1a33; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:var(--bg); color:var(--fg);}
+    header{position:sticky;top:0;background:rgba(11,18,32,.85);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.08);padding:.8rem 1.2rem;display:flex;align-items:center;gap:.75rem;z-index:50;}
+    header h1{font-size:1rem;margin:0;white-space:nowrap;}
+    header p{margin:0;color:var(--muted);font-size:.85rem;}
+    main{max-width:1100px;margin:0 auto;padding:1rem;}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:1rem;}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:1rem;box-shadow:0 8px 32px rgba(0,0,0,.35);}
+    .navlist{margin:0;padding:0;list-style:none;}
+    .navlist a{display:block;padding:.55rem .75rem;margin:.15rem 0;border-radius:10px;color:var(--fg);text-decoration:none;border:1px solid rgba(255,255,255,.05);background:rgba(255,255,255,.02);}
+    .navlist a:hover{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.04);}
+    .active{border-color:rgba(88,182,255,.5);background:rgba(88,182,255,.1);}
+    .search{display:flex;gap:.5rem;margin-bottom:1rem;}
+    .search input{flex:1;padding:.65rem .75rem;border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.2);color:var(--fg);}
+    .search input::placeholder{color:var(--muted);}
+    h2{margin-top:0;font-size:1.2rem;}
+    .meta{color:var(--muted);font-size:.85rem;}
+    article{line-height:1.65;}
+    article img{max-width:100%;height:auto;}
+    @media (max-width:900px){.grid{grid-template-columns:1fr;}header{flex-direction:column;align-items:flex-start;}}
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Ted Downing Archive</h1>
+    <p>WordPress pages & posts preserved as a browsable archive</p>
+  </div>
+</header>
+<main>
+  <div class="grid">
+    <section class="card">
+      <div class="search">
+        <input id="search" placeholder="Search title…" />
+      </div>
+      <nav>
+        <ul id="nav" class="navlist"></ul>
+      </nav>
+      <p class="meta">Tip: bookmark this page. It is meant as a legacy archive.</p>
+    </section>
+    <section class="card" id="content">
+      <h2>Loading…</h2>
+      <p class="meta">Fetching archive…</p>
+    </section>
+  </div>
+</main>
+<script>
+const API = "https://teddowning.com/wp-json/wp/v2";
+const store = {pages: [], posts: []};
+
+const decode = (s="") => new DOMParser().parseFromString(s, "text/html").documentElement.textContent;
+
+function parseHash() {
+  const h = location.hash.replace(/^#/, "") || "";
+  const [type, slug] = (h || "").split("/");
+  return {type, slug};
+}
+
+function renderNav() {
+  const nav = document.getElementById("nav");
+  const {type, slug} = parseHash();
+  nav.innerHTML = "";
+  const q = document.getElementById("search").value.trim().toLowerCase();
+  const groups = [
+    {label:"Pages", type:"pages", items: store.pages},
+    {label:"Posts", type:"posts", items: store.posts},
+  ];
+  for (const g of groups) {
+    const heading = document.createElement("li");
+    heading.innerHTML = `<div style="padding:.3rem .2rem; color: var(--muted); font-weight:600;">${g.label}</div>`;
+    nav.appendChild(heading);
+    g.items
+      .filter(it => decode(it.title?.rendered || "").toLowerCase().includes(q))
+      .forEach(it => {
+        const a = document.createElement("a");
+        a.href = `#${g.type}/${it.slug}`;
+        a.textContent = decode(it.title?.rendered || "") || it.slug;
+        if (g.type===type && it.slug===slug) a.classList.add("active");
+        const li = document.createElement("li");
+        li.appendChild(a);
+        nav.appendChild(li);
+      });
+  }
+}
+
+function renderContent(items) {
+  const {type, slug} = parseHash();
+  const content = document.getElementById("content");
+  const item = items.find(it => it.slug === slug);
+
+  if (!item) {
+    content.innerHTML = `<h2>Not found</h2><p class="meta">${type}/${slug}</p>`;
+    return;
+  }
+
+  const title = decode(item.title?.rendered || "");
+  const date = item.date ? new Date(item.date).toLocaleDateString() : "";
+  content.innerHTML = `
+    <h2>${title}</h2>
+    <p class="meta">${type === "posts" ? "Post" : "Page"} • ${date}</p>
+    <article>${item.content?.rendered || ""}</article>
+  `;
+}
+
+function render() {
+  const {type} = parseHash();
+  const items = type === "posts" ? store.posts : store.pages;
+  renderNav();
+  renderContent(items);
+}
+
+async function init() {
+  try {
+    const [pagesRes, postsRes] = await Promise.all([
+      fetch(`${API}/pages?per_page=100&_embed=1`),
+      fetch(`${API}/posts?per_page=100&_embed=1`),
+    ]);
+
+    store.pages = (await pagesRes.json()).sort((a,b) => new Date(a.date) - new Date(b.date));
+    store.posts = (await postsRes.json()).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+    if (!location.hash) {
+      if (store.pages[0]?.slug) {
+        location.hash = `#pages/${store.pages[0].slug}`;
+      } else if (store.posts[0]?.slug) {
+        location.hash = `#posts/${store.posts[0].slug}`;
+      }
+    }
+  } catch (e) {
+    console.error(e);
+  }
+
+  render();
+  document.getElementById("search").addEventListener("input", render);
+  window.addEventListener("hashchange", render);
+}
+
+init();
+</script>
+</body>
+</html>
